@@ -68,6 +68,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    flex: 1;
 }
 
 .guess-row {
@@ -118,6 +119,11 @@ body {
     font-size: 0.85rem;
     color: #888;
     border-top: 1px solid #3a3a3c;
+    width: 100%;
+}
+
+#credits p {
+    margin: 0;
 }
 
 #credits a {
