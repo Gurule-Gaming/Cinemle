@@ -494,6 +494,24 @@ function createInfoBlock(text, statusClass) {
     return block;
 }
 
+async function getWatchProviders(movieId) {
+    // Replace 'US' with your preferred region code
+    const region = "US";
+    const url = `https://api.themoviedb.org/3/movie/${movieId}/watch/providers?api_key=${API_KEY}`;
+    
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        // Return only the data for your specified region
+        return data.results && data.results[region] ? data.results[region] : null;
+    } catch (err) {
+        console.error("Failed to fetch streaming providers:", err);
+        return null;
+    }
+}
+
+
 // --- STORAGE CACHING LOOPS ---
 function saveGuessToStorage(movieId) {
     let savedGuesses = JSON.parse(localStorage.getItem("moviedle_guesses")) || [];
