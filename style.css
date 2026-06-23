@@ -109,3 +109,22 @@ body {
     from { transform: translateY(-10px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
 }
+
+/* Credits Footer */
+#credits {
+    margin-top: auto;
+    padding-top: 30px;
+    text-align: center;
+    font-size: 0.85rem;
+    color: #888;
+    border-top: 1px solid #3a3a3c;
+}
+
+#credits a {
+    color: #b59f3b;
+    text-decoration: none;
+}
+
+#credits a:hover {
+    text-decoration: underline;
+}
