@@ -1,31 +1,31 @@
 // 1. Setup API configuration and Daily State Variables
 const API_KEY = "a24cbba3b16a5ea825ec42ac4e4c8d52"; 
 let SECRET_MOVIE = null;
-let allHollywoodMovies = [];
+let allGlobalMovies = [];
 
 const searchInput = document.getElementById("movie-search");
 const dropdown = document.getElementById("dropdown-results");
 const feed = document.getElementById("guesses-feed");
 
-// 2. Fetch a curated list of popular Hollywood movies on launch
+// 2. Fetch a global list of highly popular movies on launch
 async function initGame() {
     try {
         let moviePromises = [];
-        // Fetch top 5 pages of popular US releases to build our pool
+        // Fetch top 5 pages of globally trending movies sorted by general popularity
+        // We require at least 300 votes so obscure/unheard of entries are completely ignored
         for (let page = 1; page <= 5; page++) {
             moviePromises.push(
-                fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${API_KEY}&language=en-US&region=US&sort_by=vote_count.desc&with_original_language=en&page=${page}`)
+                fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${API_KEY}&language=en-US&sort_by=popularity.desc&vote_count.gte=300&page=${page}`)
                 .then(res => {
                     if (!res.ok) throw new Error("API Network response issue");
-                    return res.json();
-                })
+                    return res.json())
             );
         }
         
         let results = await Promise.all(moviePromises);
-        allHollywoodMovies = results.flatMap(data => data.results || []);
+        allGlobalMovies = results.flatMap(data => data.results || []);
 
-        if (allHollywoodMovies.length > 0) {
+        if (allGlobalMovies.length > 0) {
             await setDailyMovie();
         } else {
             document.getElementById("hint-text").innerText = "Error loading movie pool. Check API Key.";
@@ -41,8 +41,8 @@ async function setDailyMovie() {
     const today = new Date();
     const dateSeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
     
-    const targetIndex = dateSeed % allHollywoodMovies.length;
-    const basicMovieInfo = allHollywoodMovies[targetIndex];
+    const targetIndex = dateSeed % allGlobalMovies.length;
+    const basicMovieInfo = allGlobalMovies[targetIndex];
 
     // Request deep credits to uncover the Director's name using the movie ID
     const detailRes = await fetch(`https://api.themoviedb.org/3/movie/${basicMovieInfo.id}?api_key=${API_KEY}&append_to_response=credits`);
@@ -60,7 +60,7 @@ async function setDailyMovie() {
         poster: details.poster_path ? `https://image.tmdb.org/t/p/w200${details.poster_path}` : ""
     };
 
-    // MAKE THE HINT EXTREMELY BROAD (No plot description at all!)
+    // Clean hint system that completely protects the broad structure
     document.getElementById("hint-text").innerText = `Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`;
 }
 
@@ -70,8 +70,8 @@ searchInput.addEventListener("input", () => {
     dropdown.innerHTML = "";
     if (query.length < 2) return;
 
-    // Filter our main array pool for matches
-    let filtered = allHollywoodMovies.filter(m => m.title?.toUpperCase().includes(query)).slice(0, 8);
+    // Filter our main global array pool for matches
+    let filtered = allGlobalMovies.filter(m => m.title?.toUpperCase().includes(query)).slice(0, 8);
     
     filtered.forEach(movie => {
         let movieYear = movie.release_date ? movie.release_date.split("-")[0] : "N/A";
