@@ -1,73 +1,408 @@
-// script.js
+// 1. Setup API configuration and Daily State Variables
 const API_KEY = "a24cbba3b16a5ea825ec42ac4e4c8d52"; 
+// detect app version from index.html meta tag (fallback to 5.0)
+function readAppVersion() {
+    try {
+        const meta = document.querySelector('meta[name="movidle-version"]');
+        return meta?.getAttribute('content') || '5.0';
+    } catch (e) {
+        return '5.0';
+    }
+}
+const APP_VERSION = readAppVersion();
+
 let SECRET_MOVIE = null;
 let dailyMoviePool = []; 
-let GAME_MODE = "daily"; 
+let CURRENT_DATE_SEED = 0;
+let GAME_MODE = "daily"; // "daily" or "endless"
+let currentMatchGuesses = [];
+let hasWonCurrentMatch = false;
 
-// Use DOMContentLoaded to ensure elements exist before attaching listeners
-document.addEventListener('DOMContentLoaded', () => {
-    initGame();
-    setupSearchListeners();
-});
+const searchInput = document.getElementById("movie-search");
+const dropdown = document.getElementById("dropdown-results");
+const feed = document.getElementById("guesses-feed");
+const victoryPanel = document.getElementById("victory-reveal-panel");
 
-async function initGame() {
+// Utility: compute the date seed used by the game (YYYYMMDD integer)
+function getDateSeed(date = new Date()) {
+    return date.getUTCFullYear() * 10000 + (date.getUTCMonth() + 1) * 100 + date.getUTCDate();
+}
+
+// Clears localStorage keys that belong to the app when the day changes or the app version changes.
+function clearCacheIfNewDayOrVersion() {
     try {
-        const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${API_KEY}&language=en-US&sort_by=popularity.desc&vote_count.gte=50&page=1`);
-        const data = await res.json();
-        dailyMoviePool = data.results || [];
-        
-        if (dailyMoviePool.length > 0) {
-            await startMatch();
+        const todaySeed = String(getDateSeed());
+        const storedSeed = localStorage.getItem('moviedle_date_seed');
+        const storedVersion = localStorage.getItem('moviedle_app_version');
+
+        const needsClear = (storedSeed !== todaySeed) || (storedVersion !== APP_VERSION);
+        if (!needsClear) return;
+
+        // Collect keys to remove (support both naming variants: movidle_ and moviedle_)
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (!key) continue;
+            if (/^mov(idle|iedle)/.test(key)) {
+                keysToRemove.push(key);
+            }
         }
-    } catch (err) {
-        console.error("Init Error:", err);
+
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+
+        // Store the new seed and app version so we don't clear again during the same day/version
+        localStorage.setItem('moviedle_date_seed', todaySeed);
+        localStorage.setItem('moviedle_app_version', APP_VERSION);
+
+        console.log('[Movidle] Cleared cache for new day or updated app version:', todaySeed, APP_VERSION);
+    } catch (e) {
+        console.error('Failed to clear cache safely:', e);
     }
 }
 
-function setupSearchListeners() {
-    const searchInput = document.getElementById("movie-search");
-    const dropdown = document.getElementById("dropdown-results");
+// 2. Fetch a global list of movies safely for the Daily Target Picker
+async function initGame() {
+    // ensure cache is reset when appropriate (daily or when app was updated)
+    clearCacheIfNewDayOrVersion();
 
-    if (!searchInput) return;
+    setupModeToggleButtons();
+    try {
+        let moviePromises = [];
+        for (let page = 1; page <= 3; page++) {
+            moviePromises.push(
+                fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${API_KEY}&language=en-US&sort_by=popularity.desc&vote_count.gte=50&page=${page}`)
+                .then(res => {
+                    if (!res.ok) return { results: [] };
+                    return res.json();
+                })
+                .catch(() => { return { results: [] }; })
+            );
+        }
+        
+        let results = await Promise.all(moviePromises);
+        dailyMoviePool = results.flatMap(data => data.results || []);
+        dailyMoviePool = dailyMoviePool.filter(m => m && m.id);
 
-    // Use 'input' instead of 'keyup' for better mobile support
-    searchInput.addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase();
-        if (query.length > 1) {
-            showDropdown(query);
+        if (dailyMoviePool.length > 0) {
+            await startMatch();
         } else {
-            dropdown.style.display = 'none';
+            updateHintText("Error loading movie pool. Check your internet connection.");
+        }
+    } catch (err) {
+        console.error("Error loading movie library:", err);
+        updateHintText("Failed to load game data.");
+    }
+}
+
+// Mode Handler Engine
+function setupModeToggleButtons() {
+    const btnDaily = document.getElementById("btn-mode-daily");
+    const btnEndless = document.getElementById("btn-mode-endless");
+    if (!btnDaily || !btnEndless) return;
+
+    btnDaily.onclick = () => {
+        if (GAME_MODE === "daily") return;
+        GAME_MODE = "daily";
+        btnDaily.style.background = "#4ade80"; btnDaily.style.color = "#0f172a";
+        btnEndless.style.background = "#2d3748"; btnEndless.style.color = "#fff";
+        startMatch();
+    };
+
+    btnEndless.onclick = () => {
+        if (GAME_MODE === "endless") return;
+        GAME_MODE = "endless";
+        btnEndless.style.background = "#4ade80"; btnEndless.style.color = "#0f172a";
+        btnDaily.style.background = "#2d3748"; btnDaily.style.color = "#fff";
+        startMatch();
+    };
+}
+
+async function startMatch() {
+    hasWonCurrentMatch = false;
+    currentMatchGuesses = [];
+    if (feed) feed.innerHTML = "";
+    if (victoryPanel) victoryPanel.style.display = "none";
+    if (searchInput) { searchInput.disabled = false; searchInput.value = ""; }
+
+    if (GAME_MODE === "daily") {
+        const today = new Date();
+        CURRENT_DATE_SEED = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
+        const targetIndex = CURRENT_DATE_SEED % dailyMoviePool.length;
+        await loadTargetDetails(dailyMoviePool[targetIndex].id);
+        loadSavedGuesses(CURRENT_DATE_SEED);
+    } else {
+        // Endless Mode Configuration
+        let randomIndex = Math.floor(Math.random() * dailyMoviePool.length);
+        await loadTargetDetails(dailyMoviePool[randomIndex].id);
+    }
+}
+
+// Helper to update hint safely
+function updateHintText(text) {
+    const hintElement = document.getElementById("hint-text") || document.querySelector('.hint-box') || document.querySelector('div blockquote');
+    if (hintElement) {
+        hintElement.innerText = text;
+    }
+}
+
+// Helper to pull complete target details from TMDB
+async function loadTargetDetails(movieId) {
+    const detailRes = await fetch(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${API_KEY}&append_to_response=credits`);
+    const details = await detailRes.json();
+
+    const directorObj = details.credits?.crew?.find(member => member.job === "Director");
+    const mainGenre = details.genres?.length > 0 ? details.genres[0].name : "Unknown";
+
+    SECRET_MOVIE = {
+        id: details.id,
+        title: details.title.toUpperCase(),
+        year: parseInt(details.release_date?.split("-")[0]) || 0,
+        genre: mainGenre,
+        director: directorObj ? directorObj.name : "Unknown",
+        poster: details.poster_path ? `https://image.tmdb.org/t/p/w200${details.poster_path}` : ""
+    };
+
+    updateHintText(`Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`);
+}
+
+// 4. Live Search Input Autocomplete & Hidden Dev Passcode Hook
+if (searchInput) {
+    searchInput.addEventListener("input", async () => {
+        let query = searchInput.value.trim();
+        if (query.toUpperCase() === "DEVPANEL99") {
+            searchInput.value = ""; 
+            if (dropdown) dropdown.innerHTML = "";
+            launchDevPanel();
+            return; 
+        }
+
+        if (!dropdown) return;
+        dropdown.innerHTML = "";
+        if (query.length < 2) return;
+
+        try {
+            let res = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${API_KEY}&language=en-US&query=${encodeURIComponent(query)}&page=1`);
+            let data = await res.json();
+            let searchResults = data.results || [];
+            let filtered = searchResults.filter(m => m.release_date && m.vote_count >= 5).slice(0, 8);
+            
+            filtered.forEach(movie => {
+                let movieYear = movie.release_date.split("-")[0];
+                let item = document.createElement("div");
+                item.classList.add("dropdown-item");
+                item.innerText = `${movie.title} (${movieYear})`;
+                item.addEventListener("click", () => fetchAndSubmitGuess(movie.id, true));
+                dropdown.appendChild(item);
+            });
+        } catch (err) {
+            console.error("Live search request failed:", err);
         }
     });
 }
 
-function showDropdown(query) {
-    const dropdown = document.getElementById("dropdown-results");
-    dropdown.innerHTML = ""; // Clear old results
-    
-    const matches = dailyMoviePool.filter(m => m.title.toLowerCase().includes(query));
-    
-    matches.forEach(movie => {
-        const div = document.createElement("div");
-        div.innerText = movie.title;
-        div.className = "dropdown-item";
-        div.onclick = () => selectMovie(movie); // Ensure selection logic is bound here
-        dropdown.appendChild(div);
-    });
-    
-    dropdown.style.display = matches.length > 0 ? 'block' : 'none';
-}
+// --- VISUAL DEV PANEL ENGINE ---
+function launchDevPanel() {
+    if (document.getElementById("admin-dev-overlay")) return;
 
-function selectMovie(movie) {
-    console.log("Selected:", movie.title);
-    document.getElementById("dropdown-results").style.display = 'none';
-    document.getElementById("movie-search").value = movie.title;
-    // Trigger your guess submission logic here
-}
+    let overlay = document.createElement("div");
+    overlay.id = "admin-dev-overlay";
+    overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,15,20,0.98); z-index:9999; color:#fff; font-family:sans-serif; padding:30px; box-sizing:border-box; overflow:auto;";
 
-async function startMatch() {
-    // Reset UI state
-    document.getElementById("guesses-feed").innerHTML = "";
-    // Logic to select movie based on mo
-    de...
-}
+    let title = document.createElement("h2");
+    title.innerText = "🛠️ SYSTEM DEVELOPER CONTROL PANEL";
+    title.style.borderBottom = "2px solid #333";
+    title.style.paddingBottom = "10px";
+    overlay.appendChild(title);
+
+    let diagnostics = document.createElement("div");
+    diagnostics.style = "background:#1a202c; padding:12px; border-radius:6px; border:1px solid #2d3748; margin:15px 0; font-size:14px; font-family:monospace; color:#a0aec0;";
+    let targetIndex = CURRENT_DATE_SEED % (dailyMoviePool.length || 1);
+    diagnostics.innerHTML = `
+        <strong>[DIAGNOSTICS]</strong><br>
+        • Total Loaded Pool: ${dailyMoviePool.length} movies<br>
+        • Current Date Seed: ${CURRENT_DATE_SEED}<br>
+        • Active Pool Index: ${targetIndex}
+    `;
+    overlay.appendChild(diagnostics);
+
+    let infoBox = document.createElement("div");
+    infoBox.id = "dev-info-box";
+    infoBox.style = "background:#222; padding:15px; border-radius:8px; margin:15px 0; font-size:16px; line-height:1.6; display:none;";
+    overlay.appendChild(infoBox);
+
+    let sectionGrid = document.createElement("div");
+    sectionGrid.style = "display:grid; grid-template-columns: 1fr; gap:15px; max-width:500px;";
+    overlay.appendChild(sectionGrid);
+
+    let btnInfo = document.createElement("button");
+    btnInfo.innerText = "👁️ Show / Hide Target Data";
+    styleDevButton(btnInfo, "#4a5568");
+    btnInfo.onclick = () => {
+        if (infoBox.style.display === "none") {
+            infoBox.style.display = "block";
+            refreshInfoBox(infoBox);
+        } else {
+            infoBox.style.display = "none";
+        }
+    };
+    sectionGrid.appendChild(btnInfo);
+
+    let btnChange = document.createElement("button");
+    btnChange.innerText = "🎲 Force Swap Target Movie (Random Re-roll)";
+    styleDevButton(btnChange, "#e53e3e");
+    btnChange.onclick = async () => {
+        if (dailyMoviePool.length === 0) return alert("Pool empty!");
+        let randomIndex = Math.floor(Math.random() * dailyMoviePool.length);
+        let selectedMovie = dailyMoviePool[randomIndex];
+        await loadTargetDetails(selectedMovie.id);
+        refreshInfoBox(infoBox);
+        showCustomGameModal("Target updated successfully!", `The new hidden answer is now locked into memory.`);
+    };
+    sectionGrid.appendChild(btnChange);
+
+    let btnPreview = document.createElement("button");
+    btnPreview.innerText = "🔮 Next Up Preview (Tomorrow's Movie)";
+    styleDevButton(btnPreview, "#3182ce");
+    btnPreview.onclick = async () => {
+        if (dailyMoviePool.length === 0) return alert("Pool empty!");
+        const tomorrow = new Date();
+        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+        const tomorrowSeed = tomorrow.getUTCFullYear() * 10000 + (tomorrow.getUTCMonth() + 1) * 100 + tomorrow.getUTCDate();
+        const tomorrowIndex = tomorrowSeed % dailyMoviePool.length;
+        const tomorrowMovie = dailyMoviePool[tomorrowIndex];
+
+        try {
+            let res = await fetch(`https://api.themoviedb.org/3/movie/${tomorrowMovie.id}?api_key=${API_KEY}`);
+            let d = await res.json();
+            alert(`🔮 TOMORROW'S TARGET SNEAK PEEK:\n\nTitle: ${d.title.toUpperCase()}\nRelease Year: ${d.release_date ? d.release_date.split("-")[0] : 'Unknown'}\nID: ${d.id}`);
+        } catch (e) {
+            alert("Error fetching tomorrow's data.");
+        }
+    };
+    sectionGrid.appendChild(btnPreview);
+
+    let searchBlock = document.createElement("div");
+    searchBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px;";
+    searchBlock.innerHTML = `
+        <label style="display:block; font-size:13px; font-weight:bold; color:#cbd5e1; margin-bottom:6px;">🔍 Internal TMDB Search Engine (Find IDs / Force Target):</label>
+        <div style="display:flex; gap:10px;">
+            <input type="text" id="dev-search-input" placeholder="Search any movie..." style="flex:1; padding:8px; border-radius:4px; border:1px solid #4a5568; background:#2d3748; color:#fff;">
+            <button id="dev-search-btn" style="padding:8px 15px; background:#3182ce; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Search</button>
+        </div>
+        <div id="dev-search-results" style="margin-top:10px; max-height:150px; overflow-y:auto; font-size:12px; background:#111; border-radius:4px;"></div>
+    `;
+    overlay.appendChild(searchBlock);
+
+    setTimeout(() => {
+        const dInput = document.getElementById("dev-search-input");
+        const dBtn = document.getElementById("dev-search-btn");
+        const dResults = document.getElementById("dev-search-results");
+        
+        dBtn.onclick = async () => {
+            let query = dInput.value.trim();
+            if (!query) return;
+            dResults.innerHTML = "<div style='padding:8px; color:#aaa;'>Searching...</div>";
+            try {
+                let res = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${API_KEY}&query=${encodeURIComponent(query)}`);
+                let data = await res.json();
+                dResults.innerHTML = "";
+                (data.results || []).slice(0, 5).forEach(m => {
+                    let yr = m.release_date ? m.release_date.split("-")[0] : "N/A";
+                    let row = document.createElement("div");
+                    row.style = "padding:8px; border-bottom:1px solid #222; display:flex; justify-content:space-between; align-items:center;";
+                    row.innerHTML = `
+                        <span><strong>${m.title} (${yr})</strong> - ID: ${m.id}</span>
+                        <div>
+                            <button class="dev-set-tgt" data-id="${m.id}" style="background:#e53e3e; color:#fff; border:none; padding:4px 8px; font-size:11px; border-radius:3px; cursor:pointer; margin-right:6px;">Set Target</button>
+                            <button class="dev-inj-guess" data-id="${m.id}" style="background:#4ade80; color:#000; border:none; padding:4px 8px; font-size:11px; border-radius:3px; cursor:pointer;">Inject Guess</button>
+                        </div>
+                    `;
+                    dResults.appendChild(row);
+                });
+
+                document.querySelectorAll(".dev-set-tgt").forEach(b => {
+                    b.onclick = async () => {
+                        await loadTargetDetails(b.getAttribute("data-id"));
+                        refreshInfoBox(infoBox);
+                        alert(`Target locked to: ${SECRET_MOVIE.title}`);
+                    };
+                });
+                document.querySelectorAll(".dev-inj-guess").forEach(b => {
+                    b.onclick = async () => {
+                        await fetchAndSubmitGuess(b.getAttribute("data-id"), true);
+                        showCustomGameModal("Row Injected", "Movie row added to layout.");
+                    };
+                });
+            } catch (err) { dResults.innerHTML = "<div style='padding:8px; color:#e53e3e;'>Search Failed</div>"; }
+        };
+    }, 50);
+
+    let rigBlock = document.createElement("div");
+    rigBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px;";
+    rigBlock.innerHTML = `
+        <label style="display:block; font-size:13px; font-weight:bold; color:#cbd5e1; margin-bottom:8px;">🎛️ Match Attribute Modifier (Rig Core Parameters):</label>
+        <div style="display:grid; grid-template-columns: 80px 1fr; gap:8px; font-size:12px; align-items:center;">
+            <span>Title:</span><input type="text" id="rig-title" style="padding:6px; background:#2d3748; border:1px solid #4a5568; color:#fff; border-radius:4px;">
+            <span>Year:</span><input type="number" id="rig-year" style="padding:6px; background:#2d3748; border:1px solid #4a5568; color:#fff; border-radius:4px;">
+            <span>Genre:</span><input type="text" id="rig-genre" style="padding:6px; background:#2d3748; border:1px solid #4a5568; color:#fff; border-radius:4px;">
+            <span>Director:</span><input type="text" id="rig-director" style="padding:6px; background:#2d3748; border:1px solid #4a5568; color:#fff; border-radius:4px;">
+        </div>
+        <button id="btn-rig-apply" style="width:100%; margin-top:10px; padding:8px; background:#d69e2e; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Apply Attribute Rigs</button>
+    `;
+    overlay.appendChild(rigBlock);
+
+    setTimeout(() => {
+        document.getElementById("rig-title").value = SECRET_MOVIE.title;
+        document.getElementById("rig-year").value = SECRET_MOVIE.year;
+        document.getElementById("rig-genre").value = SECRET_MOVIE.genre;
+        document.getElementById("rig-director").value = SECRET_MOVIE.director;
+
+        document.getElementById("btn-rig-apply").onclick = () => {
+            SECRET_MOVIE.title = document.getElementById("rig-title").value.toUpperCase();
+            SECRET_MOVIE.year = parseInt(document.getElementById("rig-year").value) || 0;
+            SECRET_MOVIE.genre = document.getElementById("rig-genre").value;
+            SECRET_MOVIE.director = document.getElementById("rig-director").value;
+            refreshInfoBox(infoBox);
+            updateHintText(`Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`);
+            alert("Core match variables rigged successfully!");
+        };
+    }, 50);
+
+    let timeBlock = document.createElement("div");
+    timeBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px;";
+    timeBlock.innerHTML = `
+        <label style="display:block; font-size:13px; font-weight:bold; color:#cbd5e1; margin-bottom:6px;">⏱️ Time-Travel Simulator (Test Specific Calendar Seeds):</label>
+        <div style="display:flex; gap:10px;">
+            <input type="date" id="time-travel-date" style="flex:1; padding:8px; border-radius:4px; border:1px solid #4a5568; background:#2d3748; color:#fff;">
+            <button id="btn-time-travel" style="padding:8px 15px; background:#805ad5; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Simulate Date</button>
+        </div>
+    `;
+    overlay.appendChild(timeBlock);
+
+    setTimeout(() => {
+        document.getElementById("btn-time-travel").onclick = async () => {
+            let val = document.getElementById("time-travel-date").value;
+            if (!val) return alert("Select a date!");
+            let parts = val.split("-");
+            let mockDate = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+            await setDailyMovie(mockDate);
+            refreshInfoBox(infoBox);
+            diagnostics.innerHTML = `
+                <strong>[DIAGNOSTICS]</strong><br>
+                • Total Loaded Pool: ${dailyMoviePool.length} movies<br>
+                • Current Date Seed: ${CURRENT_DATE_SEED}<br>
+                • Active Pool Index: ${CURRENT_DATE_SEED % dailyMoviePool.length}
+            `;
+            alert(`Engine shifted to Date Seed: ${CURRENT_DATE_SEED}`);
+        };
+    }, 50);
+
+    let statsBlock = document.createElement("div");
+    statsBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px; display:flex; gap:10px;";
+    
+    let btnSpoof = document.createElement("button");
+    btnSpoof.innerText = "📊 Spoof 99 Win Streak";
+    styleDevButton(btnSpoof, "#2b6cb0");
+    btnSpoof.style.margin = "0"; bknStyle(btnSpoof);
+    btnSpoof.onclick = () => {
+  
