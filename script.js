@@ -1,5 +1,5 @@
 // 1. Setup API configuration and Daily State Variables
-const API_KEY = "a24cbba3b16a5ea825ec42ac4e4c8d52"; // 👈 PASTE YOUR REAL API KEY HERE
+const API_KEY = "a24cbba3b16a5ea825ec42ac4e4c8d52"; 
 let SECRET_MOVIE = null;
 let allHollywoodMovies = [];
 
@@ -51,17 +51,36 @@ async function setDailyMovie() {
     const directorObj = details.credits?.crew?.find(member => member.job === "Director");
     const mainGenre = details.genres?.length > 0 ? details.genres[0].name : "Unknown";
 
+    // Clean up the text: hide the title, character names, or major keywords
+    let cleanHint = details.overview || "No hint available.";
+    
+    // Hide the title if it appears in the description
+    cleanHint = cleanHint.replace(new RegExp(details.title, 'gi'), "[THE MOVIE]");
+    
+    // Hide obvious dead-giveaway Marvel/Character names if they show up
+    cleanHint = cleanHint.replace(/Tony Stark|Ultron|Avengers|Thor|Iron Man|Captain America|Peter Parker|Batman|Joker|Super/gi, "[CENSOR]");
+
+    // Chop the description down cleanly to the first sentence or two (stops at the first period after 80 characters)
+    if (cleanHint.length > 120) {
+        let endOfSentence = cleanHint.indexOf('.', 80);
+        if (endOfSentence !== -1) {
+            cleanHint = cleanHint.substring(0, endOfSentence + 1);
+        } else {
+            cleanHint = cleanHint.substring(0, 120) + "...";
+        }
+    }
+
     SECRET_MOVIE = {
         id: details.id,
         title: details.title.toUpperCase(),
         year: parseInt(details.release_date?.split("-")[0]) || 0,
         genre: mainGenre,
         director: directorObj ? directorObj.name : "Unknown",
-        hint: details.overview || "No hint available for this film.",
+        hint: details.tagline || cleanHint, // Uses the short tagline first if it exists!
         poster: details.poster_path ? `https://image.tmdb.org/t/p/w200${details.poster_path}` : ""
     };
 
-    document.getElementById("hint-text").innerText = `Daily Hint: ${SECRET_MOVIE.hint}`;
+    document.getElementById("hint-text").innerText = `Daily Hint: "${SECRET_MOVIE.hint}"`;
 }
 
 // 4. Live Search Input Autocomplete filtering real API data
@@ -146,4 +165,16 @@ function submitGuess(guessedMovie) {
     }
 }
 
-function createInfoBlock(text
+// Helper function to create blocks
+function createInfoBlock(text, statusClass) {
+    let block = document.createElement("div");
+    block.classList.add("info-block");
+    if (statusClass === true) block.classList.add("correct");
+    else if (statusClass === false) block.classList.add("absent");
+    else block.classList.add(statusClass);
+    block.innerText = text;
+    return block;
+}
+
+// Start the setup loop
+initGame();
