@@ -46,11 +46,13 @@ function updateHintText(text) {
     }
 }
 
-// 3. Mathematical Formula to pick one synchronized movie per calendar day
+// 3. Mathematical Formula to pick one synchronized movie per calendar day (UTC Fixed)
 async function setDailyMovie() {
     try {
         const today = new Date();
-        CURRENT_DATE_SEED = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+        
+        // FIX: Using UTC methods so everyone globally generates the exact same number
+        CURRENT_DATE_SEED = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
         
         const targetIndex = CURRENT_DATE_SEED % dailyMoviePool.length;
         const basicMovieInfo = dailyMoviePool[targetIndex];
@@ -274,7 +276,7 @@ function launchDevPanel() {
 }
 
 function styleDevButton(btn, bgColor) {
-    btn.style = `display:block; width:100%; max-width:400px; background:${bgColor}; color:#fff; border:none; padding:12px; margin:10px 0; font-size:14px; font-weight:bold; border-radius:6px; cursor:pointer; text-align:left;`;
+    btn.style = `display:block; width:100%; max-width:400px; background:${bgColor}; color:#fff; border:none; padding:12px; margin:10px 0; font-size:14px; font-weight:bold; border-radius:6px; cursor:pointer; transition:opacity 0.2s;`;
 }
 
 // --- CUSTOM NATIVE IN-GAME MODAL ELEMENT ---
@@ -283,10 +285,10 @@ function showCustomGameModal(titleText, bodyText) {
 
     let overlay = document.createElement("div");
     overlay.id = "custom-game-modal-overlay";
-    overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; z-index:10000; padding:20px; box-sizing:border-box; font-family:sans-serif;";
+    overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; z-index:10000; padding:20px; box-sizing:border-box;";
 
     let card = document.createElement("div");
-    card.style = "background:#1e1e24; color:#ffffff; padding:30px; border-radius:16px; width:100%; max-width:420px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid #333; transform: scale(0.9); animation: modalPop 0.25s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275);";
+    card.style = "background:#1e1e24; color:#ffffff; padding:30px; border-radius:16px; width:100%; max-width:420px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid #333; transform:scale(1); animation:modalPop 0.3s ease-out;";
 
     let headline = document.createElement("h2");
     headline.innerText = titleText;
