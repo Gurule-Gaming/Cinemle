@@ -47,11 +47,9 @@ function updateHintText(text) {
 }
 
 // 3. Mathematical Formula to pick one synchronized movie per calendar day (UTC Fixed)
-async function setDailyMovie() {
+async function setDailyMovie(customDate = null) {
     try {
-        const today = new Date();
-        
-        // FIX: Using UTC methods so everyone globally generates the exact same number
+        const today = customDate || new Date();
         CURRENT_DATE_SEED = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
         
         const targetIndex = CURRENT_DATE_SEED % dailyMoviePool.length;
@@ -139,7 +137,7 @@ function launchDevPanel() {
     title.style.paddingBottom = "10px";
     overlay.appendChild(title);
 
-    // 1. POOL DIAGNOSTIC TRACKER
+    // [1] POOL DIAGNOSTIC TRACKER
     let diagnostics = document.createElement("div");
     diagnostics.style = "background:#1a202c; padding:12px; border-radius:6px; border:1px solid #2d3748; margin:15px 0; font-size:14px; font-family:monospace; color:#a0aec0;";
     let targetIndex = CURRENT_DATE_SEED % (dailyMoviePool.length || 1);
@@ -157,6 +155,11 @@ function launchDevPanel() {
     infoBox.style = "background:#222; padding:15px; border-radius:8px; margin:15px 0; font-size:16px; line-height:1.6; display:none;";
     overlay.appendChild(infoBox);
 
+    // Action Grid Box
+    let sectionGrid = document.createElement("div");
+    sectionGrid.style = "display:grid; grid-template-columns: 1fr; gap:15px; max-width:500px;";
+    overlay.appendChild(sectionGrid);
+
     // Button: Toggle Movie Info
     let btnInfo = document.createElement("button");
     btnInfo.innerText = "👁️ Show / Hide Target Data";
@@ -164,18 +167,12 @@ function launchDevPanel() {
     btnInfo.onclick = () => {
         if (infoBox.style.display === "none") {
             infoBox.style.display = "block";
-            infoBox.innerHTML = `
-                <strong>TITLE:</strong> ${SECRET_MOVIE.title}<br>
-                <strong>YEAR:</strong> ${SECRET_MOVIE.year}<br>
-                <strong>GENRE:</strong> ${SECRET_MOVIE.genre}<br>
-                <strong>DIRECTOR:</strong> ${SECRET_MOVIE.director}<br>
-                <strong>TMDB ID:</strong> ${SECRET_MOVIE.id}
-            `;
+            refreshInfoBox(infoBox);
         } else {
             infoBox.style.display = "none";
         }
     };
-    overlay.appendChild(btnInfo);
+    sectionGrid.appendChild(btnInfo);
 
     // Button: Re-roll / Change Movie Entirely
     let btnChange = document.createElement("button");
@@ -185,31 +182,21 @@ function launchDevPanel() {
         if (dailyMoviePool.length === 0) return alert("Pool empty!");
         let randomIndex = Math.floor(Math.random() * dailyMoviePool.length);
         let selectedMovie = dailyMoviePool[randomIndex];
-        
-        btnChange.innerText = "🔄 Fetching New Core...";
         await loadTargetDetails(selectedMovie.id);
-        
-        infoBox.innerHTML = `
-            <strong>TITLE:</strong> ${SECRET_MOVIE.title}<br>
-            <strong>YEAR:</strong> ${SECRET_MOVIE.year}<br>
-            <strong>GENRE:</strong> ${SECRET_MOVIE.genre}<br>
-            <strong>DIRECTOR:</strong> ${SECRET_MOVIE.director}<br>
-            <strong>TMDB ID:</strong> ${SECRET_MOVIE.id}
-        `;
-        btnChange.innerText = "🎲 Force Swap Target Movie (Random Re-roll)";
+        refreshInfoBox(infoBox);
         showCustomGameModal("Target updated successfully!", `The new hidden answer is now locked into memory.`);
     };
-    overlay.appendChild(btnChange);
+    sectionGrid.appendChild(btnChange);
 
-    // 2. NEXT UP PREVIEW
+    // Button: Next Up Preview
     let btnPreview = document.createElement("button");
     btnPreview.innerText = "🔮 Next Up Preview (Tomorrow's Movie)";
     styleDevButton(btnPreview, "#3182ce");
     btnPreview.onclick = async () => {
         if (dailyMoviePool.length === 0) return alert("Pool empty!");
         const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowSeed = tomorrow.getFullYear() * 10000 + (tomorrow.getMonth() + 1) * 100 + tomorrow.getDate();
+        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+        const tomorrowSeed = tomorrow.getUTCFullYear() * 10000 + (tomorrow.getUTCMonth() + 1) * 100 + tomorrow.getUTCDate();
         const tomorrowIndex = tomorrowSeed % dailyMoviePool.length;
         const tomorrowMovie = dailyMoviePool[tomorrowIndex];
 
@@ -221,63 +208,180 @@ function launchDevPanel() {
             alert("Error fetching tomorrow's data.");
         }
     };
-    overlay.appendChild(btnPreview);
+    sectionGrid.appendChild(btnPreview);
 
-    // 3. AUTOCOMPLETE OVERRIDE BLOCK
-    let overrideContainer = document.createElement("div");
-    overrideContainer.style = "margin:15px 0; padding:12px; background:#1a202c; border-radius:6px; border:1px solid #2d3748;";
+    // [2] INTERNAL TMDB SEARCH ENGINE ENGINE
+    let searchBlock = document.createElement("div");
+    searchBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px;";
+    searchBlock.innerHTML = `
+        <label style="display:block; font-size:13px; font-weight:bold; color:#cbd5e1; margin-bottom:6px;">🔍 Internal TMDB Search Engine (Find IDs / Force Target):</label>
+        <div style="display:flex; gap:10px;">
+            <input type="text" id="dev-search-input" placeholder="Search any movie..." style="flex:1; padding:8px; border-radius:4px; border:1px solid #4a5568; background:#2d3748; color:#fff;">
+            <button id="dev-search-btn" style="padding:8px 15px; background:#3182ce; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Search</button>
+        </div>
+        <div id="dev-search-results" style="margin-top:10px; max-height:150px; overflow-y:auto; font-size:12px; background:#111; border-radius:4px;"></div>
+    `;
+    overlay.appendChild(searchBlock);
+
+    setTimeout(() => {
+        const dInput = document.getElementById("dev-search-input");
+        const dBtn = document.getElementById("dev-search-btn");
+        const dResults = document.getElementById("dev-search-results");
+        
+        dBtn.onclick = async () => {
+            let query = dInput.value.trim();
+            if (!query) return;
+            dResults.innerHTML = "<div style='padding:8px; color:#aaa;'>Searching...</div>";
+            try {
+                let res = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${API_KEY}&query=${encodeURIComponent(query)}`);
+                let data = await res.json();
+                dResults.innerHTML = "";
+                (data.results || []).slice(0, 5).forEach(m => {
+                    let yr = m.release_date ? m.release_date.split("-")[0] : "N/A";
+                    let row = document.createElement("div");
+                    row.style = "padding:8px; border-bottom:1px solid #222; display:flex; justify-content:space-between; align-items:center;";
+                    row.innerHTML = `
+                        <span><strong>${m.title} (${yr})</strong> - ID: ${m.id}</span>
+                        <div>
+                            <button class="dev-set-tgt" data-id="${m.id}" style="background:#e53e3e; color:#fff; border:none; padding:4px 8px; font-size:11px; border-radius:3px; cursor:pointer; margin-right:5px;">Set Target</button>
+                            <button class="dev-inj-guess" data-id="${m.id}" style="background:#4ade80; color:#000; border:none; padding:4px 8px; font-size:11px; border-radius:3px; cursor:pointer;">Inject Guess</button>
+                        </div>
+                    `;
+                    dResults.appendChild(row);
+                });
+
+                document.querySelectorAll(".dev-set-tgt").forEach(b => {
+                    b.onclick = async () => {
+                        await loadTargetDetails(b.getAttribute("data-id"));
+                        refreshInfoBox(infoBox);
+                        alert(`Target locked to: ${SECRET_MOVIE.title}`);
+                    };
+                });
+                document.querySelectorAll(".dev-inj-guess").forEach(b => {
+                    b.onclick = async () => {
+                        await fetchAndSubmitGuess(b.getAttribute("data-id"), true);
+                        showCustomGameModal("Row Injected", "Movie row added to layout.");
+                    };
+                });
+            } catch (err) { dResults.innerHTML = "<div style='padding:8px; color:#e53e3e;'>Search Failed</div>"; }
+        };
+    }, 50);
+
+    // [3] ATTRIBUTE MODIFIER (RIG THE MATCH)
+    let rigBlock = document.createElement("div");
+    rigBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px;";
+    rigBlock.innerHTML = `
+        <label style="display:block; font-size:13px; font-weight:bold; color:#cbd5e1; margin-bottom:8px;">🎛️ Match Attribute Modifier (Rig Core Parameters):</label>
+        <div style="display:grid; grid-template-columns: 80px 1fr; gap:8px; font-size:12px; align-items:center;">
+            <span>Title:</span><input type="text" id="rig-title" style="padding:6px; background:#2d3748; border:1px solid #4a5568; color:#fff; border-radius:4px;">
+            <span>Year:</span><input type="number" id="rig-year" style="padding:6px; background:#2d3748; border:1px solid #4a5568; color:#fff; border-radius:4px;">
+            <span>Genre:</span><input type="text" id="rig-genre" style="padding:6px; background:#2d3748; border:1px solid #4a5568; color:#fff; border-radius:4px;">
+            <span>Director:</span><input type="text" id="rig-director" style="padding:6px; background:#2d3748; border:1px solid #4a5568; color:#fff; border-radius:4px;">
+        </div>
+        <button id="btn-rig-apply" style="width:100%; margin-top:10px; padding:8px; background:#d69e2e; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Apply Attribute Rig overrides</button>
+    `;
+    overlay.appendChild(rigBlock);
+
+    setTimeout(() => {
+        document.getElementById("rig-title").value = SECRET_MOVIE.title;
+        document.getElementById("rig-year").value = SECRET_MOVIE.year;
+        document.getElementById("rig-genre").value = SECRET_MOVIE.genre;
+        document.getElementById("rig-director").value = SECRET_MOVIE.director;
+
+        document.getElementById("btn-rig-apply").onclick = () => {
+            SECRET_MOVIE.title = document.getElementById("rig-title").value.toUpperCase();
+            SECRET_MOVIE.year = parseInt(document.getElementById("rig-year").value) || 0;
+            SECRET_MOVIE.genre = document.getElementById("rig-genre").value;
+            SECRET_MOVIE.director = document.getElementById("rig-director").value;
+            refreshInfoBox(infoBox);
+            updateHintText(`Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`);
+            alert("Core match variables rigged successfully!");
+        };
+    }, 50);
+
+    // [4] TIME-TRAVEL SIMULATOR (DATE TESTER)
+    let timeBlock = document.createElement("div");
+    timeBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px;";
+    timeBlock.innerHTML = `
+        <label style="display:block; font-size:13px; font-weight:bold; color:#cbd5e1; margin-bottom:6px;">⏱️ Time-Travel Simulator (Test Specific Calendar Seeds):</label>
+        <div style="display:flex; gap:10px;">
+            <input type="date" id="time-travel-date" style="flex:1; padding:8px; border-radius:4px; border:1px solid #4a5568; background:#2d3748; color:#fff;">
+            <button id="btn-time-travel" style="padding:8px 15px; background:#805ad5; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Simulate Date</button>
+        </div>
+    `;
+    overlay.appendChild(timeBlock);
+
+    setTimeout(() => {
+        document.getElementById("btn-time-travel").onclick = async () => {
+            let val = document.getElementById("time-travel-date").value;
+            if (!val) return alert("Select a date layout parameter first!");
+            let parts = val.split("-");
+            let mockDate = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+            await setDailyMovie(mockDate);
+            refreshInfoBox(infoBox);
+            diagnostics.innerHTML = `
+                <strong>[DIAGNOSTICS]</strong><br>
+                • Total Loaded Pool: ${dailyMoviePool.length} movies<br>
+                • Current Date Seed: ${CURRENT_DATE_SEED}<br>
+                • Active Pool Index: ${CURRENT_DATE_SEED % dailyMoviePool.length}
+            `;
+            alert(`Engine shifted to Date Seed: ${CURRENT_DATE_SEED}`);
+        };
+    }, 50);
+
+    // [5] PLAYER STAT SPOOFER & RESET
+    let statsBlock = document.createElement("div");
+    statsBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px; display:flex; gap:10px;";
     
-    let overrideLabel = document.createElement("label");
-    overrideLabel.innerText = "🎯 Force Inject Guess Row (By TMDB ID):";
-    overrideLabel.style = "display:block; font-size:13px; font-weight:bold; color:#cbd5e1; margin-bottom:6px;";
-    overrideContainer.appendChild(overrideLabel);
-
-    let overrideInput = document.createElement("input");
-    overrideInput.type = "number";
-    overrideInput.placeholder = "e.g., 272 (Batman Begins)";
-    overrideInput.style = "width:70%; padding:8px; border-radius:4px; border:1px solid #4a5568; background:#2d3748; color:#fff; font-size:14px; box-sizing:border-box;";
-    overrideContainer.appendChild(overrideInput);
-
-    let overrideBtn = document.createElement("button");
-    overrideBtn.innerText = "Inject";
-    overrideBtn.style = "width:26%; margin-left:4%; padding:8px; font-weight:bold; background:#4ade80; color:#0f172a; border:none; border-radius:4px; cursor:pointer;";
-    overrideBtn.onclick = async () => {
-        let idVal = overrideInput.value.trim();
-        if (!idVal) return alert("Enter a valid TMDB Movie ID number first!");
-        await fetchAndSubmitGuess(idVal, true);
-        overrideInput.value = "";
-        showCustomGameModal("Row Injected", `Movie ID ${idVal} has been processed onto the game board feed.`);
+    let btnSpoof = document.createElement("button");
+    btnSpoof.innerText = "📊 Spoof 99 Win Streak";
+    styleDevButton(btnSpoof, "#2b6cb0");
+    btnSpoof.style.margin = "0"; bknStyle(btnSpoof);
+    btnSpoof.onclick = () => {
+        localStorage.setItem("movidle_stat_streak", "99");
+        alert("Local storage data win streak spoofed to 99!");
     };
-    overrideContainer.appendChild(overrideBtn);
-    overlay.appendChild(overrideContainer);
+    statsBlock.appendChild(btnSpoof);
 
-    // 4. RESET CACHE BUTTON
     let btnResetCache = document.createElement("button");
-    btnResetCache.innerText = "🗑️ Hard Reset Cache (Clear Board History)";
+    btnResetCache.innerText = "🗑️ Reset Cache History";
     styleDevButton(btnResetCache, "#d69e2e");
+    btnResetCache.style.margin = "0"; bknStyle(btnResetCache);
     btnResetCache.onclick = () => {
-        if (confirm("Are you sure you want to clear your local guess history cache and refresh the game board?")) {
+        if (confirm("Clear local guess history cache and refresh board?")) {
             localStorage.removeItem("moviedle_guesses");
             localStorage.removeItem("moviedle_date_seed");
+            localStorage.removeItem("movidle_stat_streak");
             window.location.reload();
         }
     };
-    overlay.appendChild(btnResetCache);
+    statsBlock.appendChild(btnResetCache);
+    overlay.appendChild(statsBlock);
 
-    // Exit Dev Panel Button
+    // Close Button
     let btnClose = document.createElement("button");
     btnClose.innerText = "❌ Close Developer Suite";
     styleDevButton(btnClose, "#2d3748");
-    btnClose.style.marginTop = "30px";
+    btnClose.style.marginTop = "20px";
     btnClose.onclick = () => overlay.remove();
     overlay.appendChild(btnClose);
 
     document.body.appendChild(overlay);
 }
 
-function styleDevButton(btn, bgColor) {
-    btn.style = `display:block; width:100%; max-width:400px; background:${bgColor}; color:#fff; border:none; padding:12px; margin:10px 0; font-size:14px; font-weight:bold; border-radius:6px; cursor:pointer; transition:opacity 0.2s;`;
+function refreshInfoBox(box) {
+    box.innerHTML = `
+        <strong>TITLE:</strong> ${SECRET_MOVIE.title}<br>
+        <strong>YEAR:</strong> ${SECRET_MOVIE.year}<br>
+        <strong>GENRE:</strong> ${SECRET_MOVIE.genre}<br>
+        <strong>DIRECTOR:</strong> ${SECRET_MOVIE.director}<br>
+        <strong>TMDB ID:</strong> ${SECRET_MOVIE.id}
+    `;
 }
+function styleDevButton(btn, bgColor) {
+    btn.style = `display:block; width:100%; background:${bgColor}; color:#fff; border:none; padding:12px; margin:5px 0; font-size:14px; font-weight:bold; border-radius:6px; cursor:pointer; text-align:left;`;
+}
+function bknStyle(b) { b.style.flex = "1"; b.style.textAlign = "center"; }
 
 // --- CUSTOM NATIVE IN-GAME MODAL ELEMENT ---
 function showCustomGameModal(titleText, bodyText) {
@@ -285,10 +389,10 @@ function showCustomGameModal(titleText, bodyText) {
 
     let overlay = document.createElement("div");
     overlay.id = "custom-game-modal-overlay";
-    overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; z-index:10000; padding:20px; box-sizing:border-box;";
+    overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; z-index:10000; padding:20px; box-sizing:border-box; font-family:sans-serif;";
 
     let card = document.createElement("div");
-    card.style = "background:#1e1e24; color:#ffffff; padding:30px; border-radius:16px; width:100%; max-width:420px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid #333; transform:scale(1); animation:modalPop 0.3s ease-out;";
+    card.style = "background:#1e1e24; color:#ffffff; padding:30px; border-radius:16px; width:100%; max-width:420px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid #333; transform: scale(0.9); animation: modalPop 0.25s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275);";
 
     let headline = document.createElement("h2");
     headline.innerText = titleText;
@@ -392,27 +496,21 @@ function createInfoBlock(text, statusClass) {
 
 // --- STORAGE CACHING LOOPS ---
 function saveGuessToStorage(movieId) {
-    const today = new Date();
-    const dateSeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-    
     let savedGuesses = JSON.parse(localStorage.getItem("moviedle_guesses")) || [];
-    
     if (!savedGuesses.includes(movieId)) {
         savedGuesses.push(movieId);
         localStorage.setItem("moviedle_guesses", JSON.stringify(savedGuesses));
-        localStorage.setItem("moviedle_date_seed", dateSeed.toString());
+        localStorage.setItem("moviedle_date_seed", CURRENT_DATE_SEED.toString());
     }
 }
 
 async function loadSavedGuesses(currentDateSeed) {
     const storedDateSeed = localStorage.getItem("moviedle_date_seed");
-    
     if (storedDateSeed !== currentDateSeed.toString()) {
         localStorage.removeItem("moviedle_guesses");
         localStorage.removeItem("moviedle_date_seed");
         return;
     }
-    
     let savedGuesses = JSON.parse(localStorage.getItem("moviedle_guesses")) || [];
     for (const id of savedGuesses) {
         await fetchAndSubmitGuess(id, false);
