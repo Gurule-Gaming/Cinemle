@@ -67,6 +67,10 @@ async function setDailyMovie() {
 
         // Clean hint system that completely protects the broad structure
         document.getElementById("hint-text").innerText = `Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`;
+        
+        // NEW: Load saved guesses from storage after the secret movie is officially loaded
+        loadSavedGuesses(dateSeed);
+
     } catch (err) {
         console.error("Error setting daily movie:", err);
         document.getElementById("hint-text").innerText = "Failed to load game data.";
@@ -95,7 +99,7 @@ searchInput.addEventListener("input", async () => {
             item.innerText = `${movie.title} (${movieYear})`;
             
             // Pass the explicit movie ID directly to the guess loader
-            item.addEventListener("click", () => fetchAndSubmitGuess(movie.id));
+            item.addEventListener("click", () => fetchAndSubmitGuess(movie.id, true));
             dropdown.appendChild(item);
         });
     } catch (err) {
@@ -104,7 +108,8 @@ searchInput.addEventListener("input", async () => {
 });
 
 // 5. Fetch complete details for the user's selected movie guess
-async function fetchAndSubmitGuess(movieId) {
+// Added "saveToStorage" flag so historical loads don't create infinite loop save events
+async function fetchAndSubmitGuess(movieId, saveToStorage = false) {
     try {
         let res = await fetch(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${API_KEY}&append_to_response=credits`);
         let d = await res.json();
@@ -117,6 +122,11 @@ async function fetchAndSubmitGuess(movieId) {
             director: dir ? dir.name : "Unknown",
             poster: d.poster_path ? `https://image.tmdb.org/t/p/w200${d.poster_path}` : ""
         });
+
+        // NEW: If it's a live player interaction, track the movie ID in local memory
+        if (saveToStorage) {
+            saveGuessToStorage(movieId);
+        }
     } catch (err) {
         console.error("Error processing guess selection:", err);
     }
@@ -173,6 +183,42 @@ function createInfoBlock(text, statusClass) {
     else block.classList.add(statusClass);
     block.innerText = text;
     return block;
+}
+
+// --- NEW STORAGE CACHING LOOPS ---
+
+function saveGuessToStorage(movieId) {
+    const today = new Date();
+    const dateSeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+    
+    // Grab whatever historical guesses are stored for today
+    let savedGuesses = JSON.parse(localStorage.getItem("moviedle_guesses")) || [];
+    
+    // Prevent tracking duplicate entries if clicked multiple times
+    if (!savedGuesses.includes(movieId)) {
+        savedGuesses.push(movieId);
+        localStorage.setItem("moviedle_guesses", JSON.stringify(savedGuesses));
+        localStorage.setItem("moviedle_date_seed", dateSeed.toString());
+    }
+}
+
+async function loadSavedGuesses(currentDateSeed) {
+    const storedDateSeed = localStorage.getItem("moviedle_date_seed");
+    
+    // If the date in the cache doesn't match today's date seed, clear out the old storage completely
+    if (storedDateSeed !== currentDateSeed.toString()) {
+        localStorage.removeItem("moviedle_guesses");
+        localStorage.removeItem("moviedle_date_seed");
+        return;
+    }
+    
+    let savedGuesses = JSON.parse(localStorage.getItem("moviedle_guesses")) || [];
+    
+    // Run through the cached IDs and inject them sequentially back onto the board
+    // We run them in sequence so they display in the correct chronological order
+    for (const id of savedGuesses) {
+        await fetchAndSubmitGuess(id, false);
+    }
 }
 
 // Start the setup loop
