@@ -1,6 +1,16 @@
 // 1. Setup API configuration and Daily State Variables
 const API_KEY = "a24cbba3b16a5ea825ec42ac4e4c8d52"; 
-const APP_VERSION = "5.0"; // bump this string when you deploy a new update
+// detect app version from index.html meta tag (fallback to 5.0)
+function readAppVersion() {
+    try {
+        const meta = document.querySelector('meta[name="movidle-version"]');
+        return meta?.getAttribute('content') || '5.0';
+    } catch (e) {
+        return '5.0';
+    }
+}
+const APP_VERSION = readAppVersion();
+
 let SECRET_MOVIE = null;
 let dailyMoviePool = []; 
 let CURRENT_DATE_SEED = 0;
