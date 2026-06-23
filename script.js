@@ -37,7 +37,7 @@ async function initGame() {
     }
 }
 
-// Helper to update hint safely regardless of HTML element exact ID names
+// Helper to update hint safely
 function updateHintText(text) {
     const hintElement = document.getElementById("hint-text") || document.querySelector('.hint-box') || document.querySelector('div blockquote');
     if (hintElement) {
@@ -54,22 +54,7 @@ async function setDailyMovie() {
         const targetIndex = dateSeed % dailyMoviePool.length;
         const basicMovieInfo = dailyMoviePool[targetIndex];
 
-        const detailRes = await fetch(`https://api.themoviedb.org/3/movie/${basicMovieInfo.id}?api_key=${API_KEY}&append_to_response=credits`);
-        const details = await detailRes.json();
-
-        const directorObj = details.credits?.crew?.find(member => member.job === "Director");
-        const mainGenre = details.genres?.length > 0 ? details.genres[0].name : "Unknown";
-
-        SECRET_MOVIE = {
-            id: details.id,
-            title: details.title.toUpperCase(),
-            year: parseInt(details.release_date?.split("-")[0]) || 0,
-            genre: mainGenre,
-            director: directorObj ? directorObj.name : "Unknown",
-            poster: details.poster_path ? `https://image.tmdb.org/t/p/w200${details.poster_path}` : ""
-        };
-
-        updateHintText(`Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`);
+        await loadTargetDetails(basicMovieInfo.id);
         loadSavedGuesses(dateSeed);
 
     } catch (err) {
@@ -78,15 +63,36 @@ async function setDailyMovie() {
     }
 }
 
+// Helper to pull complete target details from TMDB
+async function loadTargetDetails(movieId) {
+    const detailRes = await fetch(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${API_KEY}&append_to_response=credits`);
+    const details = await detailRes.json();
+
+    const directorObj = details.credits?.crew?.find(member => member.job === "Director");
+    const mainGenre = details.genres?.length > 0 ? details.genres[0].name : "Unknown";
+
+    SECRET_MOVIE = {
+        id: details.id,
+        title: details.title.toUpperCase(),
+        year: parseInt(details.release_date?.split("-")[0]) || 0,
+        genre: mainGenre,
+        director: directorObj ? directorObj.name : "Unknown",
+        poster: details.poster_path ? `https://image.tmdb.org/t/p/w200${details.poster_path}` : ""
+    };
+
+    updateHintText(`Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`);
+}
+
 // 4. Live Search Input Autocomplete & Hidden Dev Passcode Hook
 if (searchInput) {
     searchInput.addEventListener("input", async () => {
         let query = searchInput.value.trim();
         
+        // --- SECRET PASSCODE TRIGGER ---
         if (query.toUpperCase() === "DEVPANEL99") {
             searchInput.value = ""; 
             if (dropdown) dropdown.innerHTML = "";
-            alert(`🛠️ DEV MODE ACTIVE 🛠️\nToday's Answer: ${SECRET_MOVIE.title}\nYear: ${SECRET_MOVIE.year}\nDirector: ${SECRET_MOVIE.director}`);
+            launchDevPanel();
             return; 
         }
 
@@ -114,6 +120,87 @@ if (searchInput) {
             console.error("Live search request failed:", err);
         }
     });
+}
+
+// --- NEW VISUAL DEV PANEL ENGINE ---
+function launchDevPanel() {
+    // Prevent duplicate panels from opening
+    if (document.getElementById("admin-dev-overlay")) return;
+
+    let overlay = document.createElement("div");
+    overlay.id = "admin-dev-overlay";
+    // Inline styling so it works instantly without touching your CSS file
+    overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,15,20,0.98); z-index:9999; color:#fff; font-family:sans-serif; padding:30px; box-sizing:border-box; overflow-y:auto;";
+
+    let title = document.createElement("h2");
+    title.innerText = "🛠️ SYSTEM DEVELOPER CONTROL PANEL";
+    title.style.borderBottom = "2px solid #333";
+    title.style.paddingBottom = "10px";
+    overlay.appendChild(title);
+
+    // Metadata Display Container
+    let infoBox = document.createElement("div");
+    infoBox.id = "dev-info-box";
+    infoBox.style = "background:#222; padding:15px; border-radius:8px; margin:20px 0; font-size:16px; line-height:1.6; display:none;";
+    overlay.appendChild(infoBox);
+
+    // Button 1: Toggle Movie Info
+    let btnInfo = document.createElement("button");
+    btnInfo.innerText = "👁️ Show / Hide Target Data";
+    styleDevButton(btnInfo, "#4a5568");
+    btnInfo.onclick = () => {
+        if (infoBox.style.display === "none") {
+            infoBox.style.display = "block";
+            infoBox.innerHTML = `
+                <strong>TITLE:</strong> ${SECRET_MOVIE.title}<br>
+                <strong>YEAR:</strong> ${SECRET_MOVIE.year}<br>
+                <strong>GENRE:</strong> ${SECRET_MOVIE.genre}<br>
+                <strong>DIRECTOR:</strong> ${SECRET_MOVIE.director}<br>
+                <strong>TMDB ID:</strong> ${SECRET_MOVIE.id}
+            `;
+        } else {
+            infoBox.style.display = "none";
+        }
+    };
+    overlay.appendChild(btnInfo);
+
+    // Button 2: Re-roll / Change Movie Entirely
+    let btnChange = document.createElement("button");
+    btnChange.innerText = "🎲 Force Swap Target Movie (Random Re-roll)";
+    styleDevButton(btnChange, "#e53e3e");
+    btnChange.onclick = async () => {
+        if (dailyMoviePool.length === 0) return alert("Pool empty!");
+        let randomIndex = Math.floor(Math.random() * dailyMoviePool.length);
+        let selectedMovie = dailyMoviePool[randomIndex];
+        
+        btnChange.innerText = "🔄 Fetching New Core...";
+        await loadTargetDetails(selectedMovie.id);
+        
+        infoBox.innerHTML = `
+            <strong>TITLE:</strong> ${SECRET_MOVIE.title}<br>
+            <strong>YEAR:</strong> ${SECRET_MOVIE.year}<br>
+            <strong>GENRE:</strong> ${SECRET_MOVIE.genre}<br>
+            <strong>DIRECTOR:</strong> ${SECRET_MOVIE.director}<br>
+            <strong>TMDB ID:</strong> ${SECRET_MOVIE.id}
+        `;
+        btnChange.innerText = "🎲 Force Swap Target Movie (Random Re-roll)";
+        alert(`Target successfully updated to: ${SECRET_MOVIE.title}`);
+    };
+    overlay.appendChild(btnChange);
+
+    // Button 3: Exit Dev Panel
+    let btnClose = document.createElement("button");
+    btnClose.innerText = "❌ Close Developer Suite";
+    styleDevButton(btnClose, "#2d3748");
+    btnClose.style.marginTop = "40px";
+    btnClose.onclick = () => overlay.remove();
+    overlay.appendChild(btnClose);
+
+    document.body.appendChild(overlay);
+}
+
+function styleDevButton(btn, bgColor) {
+    btn.style = `display:block; width:100%; max-width:400px; background:${bgColor}; color:#fff; border:none; padding:14px; margin:12px 0; font-size:15px; font-weight:bold; border-radius:6px; cursor:pointer; text-align:left;`;
 }
 
 // 5. Fetch complete details for the user's selected movie guess
@@ -216,5 +303,4 @@ async function loadSavedGuesses(currentDateSeed) {
     }
 }
 
-// Start up the execution loops safely
 initGame();
