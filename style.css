@@ -64,6 +64,16 @@ body {
   }
 }
 
+/* Responsive adjustment for mobile screens so it doesn't overlap headers */
+@media (max-width: 600px) {
+  #Endless {
+    position: static;              /* Drops back into normal flow on tiny screens */
+    margin-bottom: 20px;
+    width: 100%;                   /* Takes full width on mobile for easier tapping */
+    box-sizing: border-box;
+  }
+}
+
 
 /* Search Dropdown Layout */
 #search-container {
