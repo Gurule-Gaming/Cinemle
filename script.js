@@ -359,6 +359,31 @@ function launchDevPanel() {
         };
     }, 50);
 
+    // Automatically censors obvious giveaways from the movie plot summary
+function generateAutomatedHint(movieObj) {
+    let hint = movieObj.overview;
+
+    // 1. Break the title into individual keywords (e.g., "The Matrix" -> ["THE", "MATRIX"])
+    // Filter out short generic words like "THE", "A", "AN", "OF", "AND"
+    const titleWords = movieObj.title.split(/[\s\-\:\'\,\.]+/);
+    const stopWords = ["THE", "A", "AN", "OF", "AND", "IN", "TO", "FOR", "WITH", "ON", "AT", "BY"];
+
+    titleWords.forEach(word => {
+        if (word.length > 1 && !stopWords.includes(word)) {
+            // Create a case-insensitive regular expression to replace the word with [REDACTED]
+            const regex = new RegExp(`\\b${word}\\b`, 'gi');
+            hint = hint.replace(regex, "█████");
+        }
+    });
+
+    // 2. Limit the length so it stays punchy and doesn't give away too much detail
+    if (hint.length > 150) {
+        hint = hint.substring(0, 150) + "...";
+    }
+
+    return hint;
+}
+    
     let statsBlock = document.createElement("div");
     statsBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px; display:flex; gap:10px;";
     
