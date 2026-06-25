@@ -100,6 +100,31 @@ if (endlessBtn) {
     });
 }
 
+// Automatically censors obvious giveaways from the movie plot summary
+function generateAutomatedHint(movieObj) {
+    let hint = movieObj.overview;
+    if (!hint || hint === "No description available.") return "No plot outline provided.";
+
+    // 1. Break the title into individual keywords (e.g., "The Matrix" -> ["THE", "MATRIX"])
+    const titleWords = movieObj.title.split(/[\s\-\:\'\,\.]+/);
+    const stopWords = ["THE", "A", "AN", "OF", "AND", "IN", "TO", "FOR", "WITH", "ON", "AT", "BY"];
+
+    titleWords.forEach(word => {
+        if (word.length > 1 && !stopWords.includes(word.toUpperCase())) {
+            // Create a case-insensitive regular expression to replace the word with redaction blocks
+            const regex = new RegExp(`\\b${word}\\b`, 'gi');
+            hint = hint.replace(regex, "█████");
+        }
+    });
+
+    // 2. Limit the length so it stays punchy and doesn't give away too much detail
+    if (hint.length > 150) {
+        hint = hint.substring(0, 150) + "...";
+    }
+
+    return hint;
+}
+
 // Helper to pull complete target details from TMDB
 async function loadTargetDetails(movieId) {
     const detailRes = await fetch(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${API_KEY}&append_to_response=credits`);
@@ -121,7 +146,8 @@ async function loadTargetDetails(movieId) {
     };
 
     const modePrefix = IS_ENDLESS ? "Endless Challenge" : "Daily Hint";
-    updateHintText(`${modePrefix}: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`);
+    const crypticPlot = generateAutomatedHint(SECRET_MOVIE);
+    updateHintText(`${modePrefix}: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year} — "${crypticPlot}"`);
 }
 
 // 4. Live Search Input Autocomplete & Hidden Dev Passcode Hook
@@ -325,7 +351,8 @@ function launchDevPanel() {
             SECRET_MOVIE.genre = document.getElementById("rig-genre").value;
             SECRET_MOVIE.director = document.getElementById("rig-director").value;
             refreshInfoBox(infoBox);
-            updateHintText(`Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year}.`);
+            const crypticPlot = generateAutomatedHint(SECRET_MOVIE);
+            updateHintText(`Daily Hint: A popular ${SECRET_MOVIE.genre} movie released in ${SECRET_MOVIE.year} — "${crypticPlot}"`);
             alert("Core match variables rigged successfully!");
         };
     }, 50);
@@ -358,31 +385,6 @@ function launchDevPanel() {
             alert(`Engine shifted to Date Seed: ${CURRENT_DATE_SEED}`);
         };
     }, 50);
-
-    // Automatically censors obvious giveaways from the movie plot summary
-function generateAutomatedHint(movieObj) {
-    let hint = movieObj.overview;
-
-    // 1. Break the title into individual keywords (e.g., "The Matrix" -> ["THE", "MATRIX"])
-    // Filter out short generic words like "THE", "A", "AN", "OF", "AND"
-    const titleWords = movieObj.title.split(/[\s\-\:\'\,\.]+/);
-    const stopWords = ["THE", "A", "AN", "OF", "AND", "IN", "TO", "FOR", "WITH", "ON", "AT", "BY"];
-
-    titleWords.forEach(word => {
-        if (word.length > 1 && !stopWords.includes(word)) {
-            // Create a case-insensitive regular expression to replace the word with [REDACTED]
-            const regex = new RegExp(`\\b${word}\\b`, 'gi');
-            hint = hint.replace(regex, "█████");
-        }
-    });
-
-    // 2. Limit the length so it stays punchy and doesn't give away too much detail
-    if (hint.length > 150) {
-        hint = hint.substring(0, 150) + "...";
-    }
-
-    return hint;
-}
     
     let statsBlock = document.createElement("div");
     statsBlock.style = "margin:15px 0; padding:15px; background:#1a202c; border-radius:8px; border:1px solid #2d3748; max-width:500px; display:flex; gap:10px;";
@@ -507,14 +509,12 @@ function showCustomGameModal(titleText, bodyText, movieData = null) {
     }
 
     let btn = document.createElement("button");
-    // If endless, button says "Play Next Movie", otherwise standard "OK"
     btn.innerText = IS_ENDLESS ? "Play Next Movie 🎬" : "OK";
     btn.style = "background:#4ade80; color:#0f172a; border:none; padding:12px 30px; font-size:16px; font-weight:bold; border-radius:8px; cursor:pointer; width:100%; transition: opacity 0.2s;";
     btn.onmouseenter = () => btn.style.opacity = "0.8";
     btn.onmouseleave = () => btn.style.opacity = "1";
     btn.onclick = () => {
         overlay.remove();
-        // If endless, instantly load another hidden mystery film!
         if (IS_ENDLESS) {
             setEndlessMovie();
         }
@@ -647,7 +647,6 @@ function createInfoBlock(text, statusClass) {
 
 // --- STORAGE CACHING LOOPS ---
 function saveGuessToStorage(movieId) {
-    // Prevent daily local history caching if in Endless Mode
     if (IS_ENDLESS) return; 
 
     let savedGuesses = JSON.parse(localStorage.getItem("moviedle_guesses")) || [];
