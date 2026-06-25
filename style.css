@@ -18,6 +18,33 @@ body {
     border: 1px solid #3a3a3c;
     text-align: center;
 }
+.custom-btn {
+  /* Colors and Typography */
+  background-color: #3498db;      /* Bright blue background */
+  color: #ffffff;                  /* White text color */
+  font-size: 16px;                 /* Readable text size */
+  font-family: sans-serif;         /* Clean font style */
+  
+  /* Sizing and Spacing */
+  padding: 12px 24px;              /* Internal spacing (12px top/bottom, 24px sides) */
+  border: none;                    /* Removes the ugly default browser border */
+  border-radius: 6px;              /* Rounds the corners smoothly */
+  
+  /* Interactivity */
+  cursor: pointer;                 /* Changes mouse to a hand icon on hover */
+  transition: background 0.3s ease;/* Animates color changes smoothly */
+}
+
+/* Hover Effect: Changes color when user moves mouse over it */
+.custom-btn:hover {
+  background-color: #2980b9;      /* Darker blue on hover */
+}
+
+/* Click Effect: Briefly shifts downwards when clicked */
+.custom-btn:active {
+  transform: translateY(1px);     /* Simulates a physical button press */
+}
+
 
 /* Search Dropdown Layout */
 #search-container {
